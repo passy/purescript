@@ -20,6 +20,11 @@ import Data.List (intercalate)
 
 import Language.PureScript.Names
 
+moduleNameToJs :: ModuleName -> String
+moduleNameToJs (ModuleName pns) =
+  let name = intercalate "_" (runProperName `map` pns)
+  in if nameIsJsBuiltIn name then "$$" ++ name else name
+
 -- |
 -- Convert an Ident into a valid Javascript identifier:
 --
@@ -30,8 +35,9 @@ import Language.PureScript.Names
 --  * Symbols are prefixed with '$' followed by a symbol name or their ordinal value.
 --
 identToJs :: Ident -> String
-identToJs (Ident name) | nameIsJsReserved name = "$$" ++ name
-identToJs (Ident name) = concatMap identCharToString name
+identToJs (Ident name)
+  | nameIsJsReserved name || nameIsJsBuiltIn name = "$$" ++ name
+  | otherwise = concatMap identCharToString name
 identToJs (Op op) = concatMap identCharToString op
 
 -- |
@@ -75,107 +81,160 @@ identCharToString c = '$' : show (ord c)
 --
 nameIsJsReserved :: String -> Bool
 nameIsJsReserved name =
-  name `elem` [ "abstract"
-              , "arguments"
-              , "boolean"
-              , "break"
-              , "byte"
-              , "case"
-              , "catch"
-              , "char"
-              , "class"
-              , "const"
-              , "continue"
-              , "debugger"
-              , "default"
-              , "delete"
-              , "do"
-              , "double"
-              , "else"
-              , "enum"
-              , "eval"
-              , "export"
-              , "extends"
-              , "final"
-              , "finally"
-              , "float"
-              , "for"
-              , "function"
-              , "goto"
-              , "if"
-              , "implements"
-              , "import"
-              , "in"
-              , "instanceof"
-              , "int"
-              , "interface"
-              , "let"
-              , "long"
-              , "native"
-              , "new"
-              , "null"
-              , "package"
-              , "private"
-              , "protected"
-              , "public"
-              , "return"
-              , "short"
-              , "static"
-              , "super"
-              , "switch"
-              , "synchronized"
-              , "this"
-              , "throw"
-              , "throws"
-              , "transient"
-              , "try"
-              , "typeof"
-              , "var"
-              , "void"
-              , "volatile"
-              , "while"
-              , "with"
-              , "yield" ] || properNameIsJsReserved name
-
-moduleNameToJs :: ModuleName -> String
-moduleNameToJs (ModuleName pns) =
-  let name = intercalate "_" (runProperName `map` pns)
-  in if properNameIsJsReserved name then "$$" ++ name else name
+  name `elem` jsAnyReserved
 
 -- |
--- Checks whether a proper name is reserved in Javascript.
+-- Checks whether a name matches a built-in value in Javascript.
 --
-properNameIsJsReserved :: String -> Bool
-properNameIsJsReserved name =
-  name `elem` [ "Infinity"
-              , "NaN"
-              , "Object"
-              , "Function"
-              , "Boolean"
-              , "Error"
-              , "EvalError"
-              , "InternalError"
-              , "RangeError"
-              , "ReferenceError"
-              , "SyntaxError"
-              , "TypeError"
-              , "URIError"
-              , "Number"
-              , "Math"
-              , "Date"
-              , "String"
-              , "RegExp"
-              , "Array"
-              , "Int8Array"
-              , "Uint8Array"
-              , "Uint8ClampedArray"
-              , "Int16Array"
-              , "Uint16Array"
-              , "Int32Array"
-              , "Uint32Array"
-              , "Float32Array"
-              , "Float64Array"
-              , "ArrayBuffer"
-              , "DataView"
-              , "JSON"
-              , "Intl" ]
+nameIsJsBuiltIn :: String -> Bool
+nameIsJsBuiltIn name =
+  elem name
+    [ "Infinity"
+    , "NaN"
+    , "undefined"
+    , "eval"
+    , "uneval"
+    , "isFinite"
+    , "isNaN"
+    , "parseFloat"
+    , "parseInt"
+    , "decodeURI"
+    , "decodeURIComponent"
+    , "encodeURI"
+    , "encodeURIComponent"
+    , "escape"
+    , "unescape"
+    , "Object"
+    , "Function"
+    , "Boolean"
+    , "Symbol"
+    , "Error"
+    , "EvalError"
+    , "InternalError"
+    , "RangeError"
+    , "ReferenceError"
+    , "SyntaxError"
+    , "TypeError"
+    , "URIError"
+    , "Number"
+    , "Math"
+    , "Date"
+    , "String"
+    , "RegExp"
+    , "Array"
+    , "Int8Array"
+    , "Uint8Array"
+    , "Uint8ClampedArray"
+    , "Int16Array"
+    , "Uint16Array"
+    , "Int32Array"
+    , "Uint32Array"
+    , "Float32Array"
+    , "Float64Array"
+    , "Map"
+    , "Set"
+    , "WeakMap"
+    , "WeakSet"
+    , "SIMD"
+    , "ArrayBuffer"
+    , "DataView"
+    , "JSON"
+    , "Promise"
+    , "Generator"
+    , "GeneratorFunction"
+    , "Reflect"
+    , "Proxy"
+    , "Intl"
+    , "arguments"
+    ]
+
+jsAnyReserved :: [String]
+jsAnyReserved =
+  concat
+    [ jsReserved
+    , jsFutureReserved
+    , jsFutureReservedStrict
+    , jsOldReserved
+    , jsLiterals
+    ]
+
+jsReserved :: [String]
+jsReserved =
+  [ "break"
+  , "case"
+  , "catch"
+  , "class"
+  , "const"
+  , "continue"
+  , "debugger"
+  , "default"
+  , "delete"
+  , "do"
+  , "else"
+  , "export"
+  , "extends"
+  , "finally"
+  , "for"
+  , "function"
+  , "if"
+  , "import"
+  , "in"
+  , "instanceof"
+  , "let"
+  , "new"
+  , "return"
+  , "super"
+  , "switch"
+  , "this"
+  , "throw"
+  , "try"
+  , "typeof"
+  , "var"
+  , "void"
+  , "while"
+  , "with"
+  , "yield"
+  ]
+
+jsFutureReserved :: [String]
+jsFutureReserved =
+  [ "enum"
+  , "await"
+  ]
+
+jsFutureReservedStrict :: [String]
+jsFutureReservedStrict =
+  [ "implements"
+  , "package"
+  , "protected"
+  , "static"
+  , "interface"
+  , "private"
+  , "public"
+  ]
+
+jsOldReserved :: [String]
+jsOldReserved =
+  [ "abstract"
+  , "boolean"
+  , "byte"
+  , "char"
+  , "double"
+  , "final"
+  , "float"
+  , "goto"
+  , "int"
+  , "long"
+  , "native"
+  , "short"
+  , "synchronized"
+  , "transient"
+  , "volatile"
+  ]
+
+jsLiterals :: [String]
+jsLiterals =
+  [ "null"
+  , "true"
+  , "false"
+  ]
