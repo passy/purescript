@@ -22,6 +22,7 @@ module Language.PureScript.Errors where
 import Prelude ()
 import Prelude.Compat
 
+import Data.Maybe (fromMaybe)
 import Data.Ord (comparing)
 import Data.Either (lefts, rights)
 import Data.List (intercalate, transpose, nub, nubBy, sortBy)
@@ -184,6 +185,23 @@ data HintCategory
 
 data ErrorMessage = ErrorMessage [ErrorMessageHint] SimpleErrorMessage deriving (Show)
 
+-- | Get the source span for an error
+errorSpan :: ErrorMessage -> SourceSpan
+errorSpan = fromMaybe (error "errorSpan: no position information") . findHint matchSpan
+  where
+  matchSpan (PositionedError ss) = Just ss
+  matchSpan _ = Nothing
+
+-- | Get the module name for an error
+errorModule :: ErrorMessage -> ModuleName
+errorModule = fromMaybe (error "errorModule: no position information") . findHint matchModule
+  where
+  matchModule (ErrorInModule mn) = Just mn
+  matchModule _ = Nothing
+
+findHint :: (ErrorMessageHint -> Maybe a) -> ErrorMessage -> Maybe a
+findHint f (ErrorMessage hints _) = getFirst . foldMap (First . f) $ hints
+
 -- |
 -- Get the error code for a particular error type
 --
@@ -287,7 +305,6 @@ errorCode em = case unwrapErrorMessage em of
   DuplicateImport{} -> "DuplicateImport"
   IntOutOfRange{} -> "IntOutOfRange"
 
-
 -- |
 -- A stack trace for an error
 --
@@ -303,7 +320,6 @@ nonEmpty = not . null . runMultipleErrors
 --
 errorMessage :: SimpleErrorMessage -> MultipleErrors
 errorMessage err = MultipleErrors [ErrorMessage [] err]
-
 
 -- |
 -- Create an error set from a single error message
@@ -388,6 +404,9 @@ onTypesInErrorMessageM f (ErrorMessage hints simple) = ErrorMessage <$> traverse
   gHint (ErrorInApplication e1 t1 e2) = ErrorInApplication e1 <$> f t1 <*> pure e2
   gHint (ErrorInInstance cl ts) = ErrorInInstance cl <$> traverse f ts
   gHint other = pure other
+
+prettyPrintSingleError' :: Bool -> Level -> ErrorMessage ->Box.Box
+prettyPrintSingleError' full level = flip evalState defaultUnknownMap . prettyPrintSingleError full level
 
 -- |
 -- Pretty print a single error, simplifying if necessary

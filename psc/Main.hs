@@ -16,6 +16,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
@@ -27,6 +28,10 @@ import Control.Monad.Writer.Strict
 import Data.List (isSuffixOf, partition)
 import Data.Version (showVersion)
 import qualified Data.Map as M
+import qualified Data.Aeson as A
+import qualified Data.Aeson.TH as A
+import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.UTF8 as BU8
 
 import Options.Applicative as Opts
 
@@ -46,39 +51,90 @@ data PSCMakeOptions = PSCMakeOptions
   , pscmOutputDir    :: FilePath
   , pscmOpts         :: P.Options
   , pscmUsePrefix    :: Bool
+  , pscmJSONErrors   :: Bool
   }
 
 data InputOptions = InputOptions
   { ioInputFiles  :: [FilePath]
   }
 
+data ErrorPosition = ErrorPosition
+  { startLine :: Int
+  , startColumn :: Int
+  , endLine :: Int
+  , endColumn :: Int
+  }
+
+data JSONError = JSONError
+  { position :: ErrorPosition
+  , message :: String
+  , errorCode :: String
+  , filename :: String
+  , moduleName :: String
+  }
+
+data JSONResult = JSONResult
+  { warnings :: [JSONError]
+  , errors :: [JSONError]
+  }
+
+$(A.deriveJSON A.defaultOptions ''ErrorPosition)
+$(A.deriveJSON A.defaultOptions ''JSONError)
+$(A.deriveJSON A.defaultOptions ''JSONResult)
+
+-- | Argumnets: verbose, use JSON, warnings, errors
+printWarningsAndErrors :: Bool -> Bool -> P.MultipleErrors -> Either P.MultipleErrors a -> IO ()
+printWarningsAndErrors verbose False warnings errors = do
+  when (P.nonEmpty warnings) $
+    hPutStrLn stderr (P.prettyPrintMultipleWarnings verbose warnings)
+  case errors of
+    Left errs -> do
+      hPutStrLn stderr (P.prettyPrintMultipleErrors verbose errs)
+      exitFailure
+    Right _ -> exitSuccess
+printWarningsAndErrors verbose True warnings errors =
+  hPutStrLn stderr . BU8.toString . B.toStrict . A.encode $
+    JSONResult (toJSONErrors P.Warning warnings)
+               (either (toJSONErrors P.Error) (const []) errors)
+  where
+  toJSONErrors :: P.Level -> P.MultipleErrors -> [JSONError]
+  toJSONErrors level = map (toJSONError level) . P.runMultipleErrors
+
+  toJSONError :: P.Level -> P.ErrorMessage -> JSONError
+  toJSONError level e =
+    JSONError (ErrorPosition (P.sourcePosLine   (P.spanStart sspan))
+                             (P.sourcePosColumn (P.spanStart sspan))
+                             (P.sourcePosLine   (P.spanEnd   sspan))
+                             (P.sourcePosColumn (P.spanEnd   sspan)))
+              (P.renderBox (P.prettyPrintSingleError' verbose level e))
+              (P.errorCode e)
+              (P.spanName sspan)
+              (P.runModuleName (P.errorModule e))
+    where
+    sspan :: P.SourceSpan
+    sspan = P.errorSpan e
+
 compile :: PSCMakeOptions -> IO ()
-compile (PSCMakeOptions inputGlob inputForeignGlob outputDir opts usePrefix) = do
-  input <- globWarningOnMisses warnFileTypeNotFound inputGlob
+compile PSCMakeOptions{..} = do
+  input <- globWarningOnMisses warnFileTypeNotFound pscmInput
   when (null input) $ do
     hPutStrLn stderr "psc: No input files."
     exitFailure
   let (jsFiles, pursFiles) = partition (isSuffixOf ".js") input
   moduleFiles <- readInput (InputOptions pursFiles)
-  inputForeign <- globWarningOnMisses warnFileTypeNotFound inputForeignGlob
+  inputForeign <- globWarningOnMisses warnFileTypeNotFound pscmForeignInput
   foreignFiles <- forM (inputForeign ++ jsFiles) (\inFile -> (inFile,) <$> readUTF8File inFile)
   case runWriterT (parseInputs moduleFiles foreignFiles) of
     Left errs -> do
-      hPutStrLn stderr (P.prettyPrintMultipleErrors (P.optionsVerboseErrors opts) errs)
+      hPutStrLn stderr (P.prettyPrintMultipleErrors (P.optionsVerboseErrors pscmOpts) errs)
       exitFailure
     Right ((ms, foreigns), warnings) -> do
       when (P.nonEmpty warnings) $
-        hPutStrLn stderr (P.prettyPrintMultipleWarnings (P.optionsVerboseErrors opts) warnings)
+        hPutStrLn stderr (P.prettyPrintMultipleWarnings (P.optionsVerboseErrors pscmOpts) warnings)
       let filePathMap = M.fromList $ map (\(fp, P.Module _ _ mn _ _) -> (mn, fp)) ms
-          makeActions = buildMakeActions outputDir filePathMap foreigns usePrefix
-      (e, warnings') <- runMake opts $ P.make makeActions (map snd ms)
-      when (P.nonEmpty warnings') $
-        hPutStrLn stderr (P.prettyPrintMultipleWarnings (P.optionsVerboseErrors opts) warnings')
-      case e of
-        Left errs -> do
-          hPutStrLn stderr (P.prettyPrintMultipleErrors (P.optionsVerboseErrors opts) errs)
-          exitFailure
-        Right _ -> exitSuccess
+          makeActions = buildMakeActions pscmOutputDir filePathMap foreigns pscmUsePrefix
+      (e, warnings') <- runMake pscmOpts $ P.make makeActions (map snd ms)
+      printWarningsAndErrors (P.optionsVerboseErrors pscmOpts) pscmJSONErrors warnings' e
 
 warnFileTypeNotFound :: String -> IO ()
 warnFileTypeNotFound = hPutStrLn stderr . ("psc: No files found using pattern: " ++)
@@ -161,6 +217,10 @@ noPrefix = switch $
   <> long "no-prefix"
   <> help "Do not include comment header"
 
+jsonErrors :: Parser Bool
+jsonErrors = switch $
+     long "json-errors"
+  <> help "Print errors to stderr as JSON"
 
 options :: Parser P.Options
 options = P.Options <$> noTco
@@ -177,7 +237,7 @@ pscMakeOptions = PSCMakeOptions <$> many inputFile
                                 <*> outputDirectory
                                 <*> options
                                 <*> (not <$> noPrefix)
-
+                                <*> jsonErrors
 
 main :: IO ()
 main = execParser opts >>= compile
