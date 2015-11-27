@@ -16,7 +16,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
@@ -29,7 +28,6 @@ import Data.List (isSuffixOf, partition)
 import Data.Version (showVersion)
 import qualified Data.Map as M
 import qualified Data.Aeson as A
-import qualified Data.Aeson.TH as A
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.UTF8 as BU8
 
@@ -45,6 +43,8 @@ import qualified Paths_purescript as Paths
 
 import Language.PureScript.Make
 
+import JSON
+
 data PSCMakeOptions = PSCMakeOptions
   { pscmInput        :: [FilePath]
   , pscmForeignInput :: [FilePath]
@@ -58,30 +58,6 @@ data InputOptions = InputOptions
   { ioInputFiles  :: [FilePath]
   }
 
-data ErrorPosition = ErrorPosition
-  { startLine :: Int
-  , startColumn :: Int
-  , endLine :: Int
-  , endColumn :: Int
-  }
-
-data JSONError = JSONError
-  { position :: ErrorPosition
-  , message :: String
-  , errorCode :: String
-  , filename :: String
-  , moduleName :: String
-  }
-
-data JSONResult = JSONResult
-  { warnings :: [JSONError]
-  , errors :: [JSONError]
-  }
-
-$(A.deriveJSON A.defaultOptions ''ErrorPosition)
-$(A.deriveJSON A.defaultOptions ''JSONError)
-$(A.deriveJSON A.defaultOptions ''JSONResult)
-
 -- | Argumnets: verbose, use JSON, warnings, errors
 printWarningsAndErrors :: Bool -> Bool -> P.MultipleErrors -> Either P.MultipleErrors a -> IO ()
 printWarningsAndErrors verbose False warnings errors = do
@@ -94,25 +70,8 @@ printWarningsAndErrors verbose False warnings errors = do
     Right _ -> exitSuccess
 printWarningsAndErrors verbose True warnings errors =
   hPutStrLn stderr . BU8.toString . B.toStrict . A.encode $
-    JSONResult (toJSONErrors P.Warning warnings)
-               (either (toJSONErrors P.Error) (const []) errors)
-  where
-  toJSONErrors :: P.Level -> P.MultipleErrors -> [JSONError]
-  toJSONErrors level = map (toJSONError level) . P.runMultipleErrors
-
-  toJSONError :: P.Level -> P.ErrorMessage -> JSONError
-  toJSONError level e =
-    JSONError (ErrorPosition (P.sourcePosLine   (P.spanStart sspan))
-                             (P.sourcePosColumn (P.spanStart sspan))
-                             (P.sourcePosLine   (P.spanEnd   sspan))
-                             (P.sourcePosColumn (P.spanEnd   sspan)))
-              (P.renderBox (P.prettyPrintSingleError' verbose level e))
-              (P.errorCode e)
-              (P.spanName sspan)
-              (P.runModuleName (P.errorModule e))
-    where
-    sspan :: P.SourceSpan
-    sspan = P.errorSpan e
+    JSONResult (toJSONErrors verbose P.Warning warnings)
+               (either (toJSONErrors verbose P.Error) (const []) errors)
 
 compile :: PSCMakeOptions -> IO ()
 compile PSCMakeOptions{..} = do

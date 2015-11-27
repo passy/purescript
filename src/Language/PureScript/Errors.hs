@@ -22,7 +22,6 @@ module Language.PureScript.Errors where
 import Prelude ()
 import Prelude.Compat
 
-import Data.Maybe (fromMaybe)
 import Data.Ord (comparing)
 import Data.Either (lefts, rights)
 import Data.List (intercalate, transpose, nub, nubBy, sortBy)
@@ -186,15 +185,15 @@ data HintCategory
 data ErrorMessage = ErrorMessage [ErrorMessageHint] SimpleErrorMessage deriving (Show)
 
 -- | Get the source span for an error
-errorSpan :: ErrorMessage -> SourceSpan
-errorSpan = fromMaybe (error "errorSpan: no position information") . findHint matchSpan
+errorSpan :: ErrorMessage -> Maybe SourceSpan
+errorSpan = findHint matchSpan
   where
   matchSpan (PositionedError ss) = Just ss
   matchSpan _ = Nothing
 
 -- | Get the module name for an error
-errorModule :: ErrorMessage -> ModuleName
-errorModule = fromMaybe (error "errorModule: no position information") . findHint matchModule
+errorModule :: ErrorMessage -> Maybe ModuleName
+errorModule = findHint matchModule
   where
   matchModule (ErrorInModule mn) = Just mn
   matchModule _ = Nothing

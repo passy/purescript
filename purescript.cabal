@@ -192,6 +192,7 @@ executable psc
     main-is: Main.hs
     buildable: True
     hs-source-dirs: psc
+    other-modules: JSON
     ghc-options: -Wall -O2 -fno-warn-unused-do-bind -threaded -rtsopts "-with-rtsopts=-N"
 
 executable psci
